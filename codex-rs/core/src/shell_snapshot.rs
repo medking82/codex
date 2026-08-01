@@ -329,9 +329,12 @@ print 'unalias -a 2>/dev/null || true'
 print '# Functions'
 functions
 print ''
-setopt_count=$(setopt | wc -l | tr -d ' ')
+zsh_opts=$(setopt | awk 'NF == 1 || $2 == "on" { print $1 }')
+setopt_count=$(printf '%s\n' "$zsh_opts" | sed '/^$/d' | wc -l | tr -d ' ')
 print "# setopts $setopt_count"
-setopt | sed 's/^/setopt /'
+if [[ -n "$zsh_opts" ]]; then
+  print -r -- "$zsh_opts" | sed 's/^/setopt /'
+fi
 print ''
 alias_count=$(alias -L | wc -l | tr -d ' ')
 print "# aliases $alias_count"

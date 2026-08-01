@@ -187,6 +187,79 @@ fn bash_snapshot_preserves_multiline_exports() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn zsh_snapshot_supports_ksh_option_print() -> Result<()> {
+    let Ok(zsh) = which::which("zsh") else {
+        return Ok(());
+    };
+    let dir = tempdir()?;
+    std::fs::write(
+        dir.path().join(".zshrc"),
+        "setopt ksh_option_print\nunsetopt aliases\n",
+    )?;
+
+    let snapshot = Command::new(&zsh)
+        .arg("-f")
+        .arg("-c")
+        .arg(zsh_snapshot_script())
+        .env_clear()
+        .env("HOME", dir.path())
+        .env("PATH", "/usr/bin:/bin")
+        .env("ZDOTDIR", dir.path())
+        .output()?;
+    assert!(
+        snapshot.status.success(),
+        "snapshot capture failed: {}",
+        String::from_utf8_lossy(&snapshot.stderr)
+    );
+
+    let snapshot_path = dir.path().join("snapshot.sh");
+    std::fs::write(&snapshot_path, &snapshot.stdout)?;
+
+    let restored = Command::new(&zsh)
+        .arg("-f")
+        .arg("-c")
+        .arg("set -e; . \"$1\"; [[ -o ksh_option_print ]]; [[ ! -o aliases ]]")
+        .arg("zsh")
+        .arg(&snapshot_path)
+        .env_clear()
+        .env("HOME", dir.path())
+        .env("PATH", "/usr/bin:/bin")
+        .output()?;
+    assert!(
+        restored.status.success(),
+        "snapshot validation failed: {}\nsnapshot:\n{}",
+        String::from_utf8_lossy(&restored.stderr),
+        String::from_utf8_lossy(&snapshot.stdout)
+    );
+
+    let snapshot = String::from_utf8(snapshot.stdout)?;
+    let mut option_section = snapshot
+        .lines()
+        .skip_while(|line| !line.starts_with("# setopts "))
+        .take_while(|line| !line.is_empty());
+    let option_count = option_section
+        .next()
+        .and_then(|line| line.strip_prefix("# setopts "))
+        .context("snapshot should include a setopts count")?
+        .parse::<usize>()?;
+    let option_commands = option_section.collect::<Vec<_>>();
+    assert_eq!(option_count, option_commands.len());
+    assert!(
+        option_commands.contains(&"setopt kshoptionprint"),
+        "snapshot should restore ksh_option_print: {option_commands:?}"
+    );
+    assert!(
+        option_commands
+            .iter()
+            .all(|line| line.split_whitespace().count() == 2),
+        "setopt commands should contain exactly one option: {option_commands:?}"
+    );
+
+    Ok(())
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn zsh_snapshot_restores_tied_path() -> Result<()> {
